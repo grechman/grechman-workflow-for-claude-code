@@ -19,9 +19,10 @@ Conditional:
 | `superpowers:using-git-worktrees` | hard complexity |
 | `frontend-design` | UI/CSS/components/design |
 | `humanizer` | `--github on` |
-| `code-review:code-review` | reviewing existing PR |
+| `pr-review-toolkit:review-pr` | reviewing existing PR |
 | `Playwright MCP` | UI/frontend/browser |
 | MCP Memory / Sequential Thinking MCP / Desktop Commander MCP | if installed |
+| `qodo-skills:get-qodo-rules` | if installed — run once in Step 0c, inject rules into all agent prompts |
 
 Optional missing → list adaptations, Y/N prompt, proceed if Y.
 
@@ -41,6 +42,7 @@ Output: `Task: [X]. Complexity: [X]. Git: [X]. GitHub: [X]. Iterations: [N].`
 ### 0c. CLAUDE.md
 If missing: create with sections Project (name/stack/entry points/dirs), Session Log, Completed Tasks, Architecture Decisions, Known Constraints. If exists: append session entry (task/complexity/params/branch=TBD/status=IN PROGRESS/skills/libraries=TBD).
 If MCP Memory: ONE read query `"<project> architecture decisions constraints"` → add under "From Memory". (Read-only; Step 2 writes are fine.) Do NOT commit yet.
+If `qodo-skills:get-qodo-rules`: invoke once → save rules summary; inject into KNOWLEDGE BLOCK in Step 4.
 
 ---
 
@@ -133,6 +135,7 @@ Per iteration:
 3. If new package needed: write to grechman-fallback.md + output `GRECHMAN BLOCKED: new package required` — do not install
 4. Implement (minimal changes) · run tests for changed files
 5. `superpowers:verification-before-completion` — mandatory
+5a. If `code-simplifier` installed: run on files modified this iteration (post-verify only, pre-commit).
 6. If fail: systematic-debugging + 1 fix + re-verify → if still fail: ROLLBACK (below)
 7. Commit `grechman(step N): <desc>` · write Last Stable SHA to CLAUDE.md
 8. If UI + Playwright MCP: navigate/interact/screenshot — infra failure: log+skip; UI bug: treat as verification failure (go back to 6)
