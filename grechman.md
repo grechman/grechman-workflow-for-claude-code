@@ -85,6 +85,18 @@ Update CLAUDE.md: `Libraries: [list]`
 
 ## STEP 5 — DISPATCH
 
+> **Execution flow by mode:**
+> ```
+> 5a (all) ──► user Y/N
+>   ├─ RALPH_LOOP ────────────────────► 5f ──► Step 6
+>   ├─ PARALLEL ──► 5b ► 5c ► 5d ► 5e ► 5g ► Step 6
+>   └─ SEQUENTIAL ► 5b ──► 5d ► 5e(loop) ► 5g ► Step 6
+> ```
+> 5b: preamble (PAR+SEQ) | 5c: worktrees (PAR only) | 5d: prompts (PAR+SEQ)
+> 5e: dispatch+wait (all, but RALPH_LOOP just invokes 5f)
+> 5f: ralph iteration loop (RALPH_LOOP mode, or fallback from 5g)
+> Agent rules: 5c confinement + 5d contract | Ralph rules: 5f per-iteration
+
 ### 5a. Choose mode — write grechman-dispatch.md
 Analyze plan dependencies. Write grechman-dispatch.md: mode, preamble step list, epilogue step list, work packages (steps / files_create / files_modify / branch / depends_on).
 
@@ -117,6 +129,16 @@ Each prompt must include: agent ID + mode + DISPATCH_SHA + assigned branch · ex
 Constraints: never commit broken code · format `grechman(step N)` · new package needed → write BLOCKED to result file, no install · no schema changes unless in steps · out-of-scope bugs → DISCOVERED_ISSUES, don't fix · run only modified-file tests.
 Skills: TDD before any new code · systematic-debugging on failures · verification-before-completion every iteration.
 Rollback: git stash → find last clean SHA → write FAILURE result → output `AGENT_BLOCKED: <reason>` (max 2 approaches per step).
+
+**Agent contract (complete — no other constraints apply to agents):**
+- Worktree confinement: run only inside assigned worktree; never read/write outside it (5c)
+- Forbidden writes: CLAUDE.md, knowledge.md, grechman-dispatch.md, other agents' result files
+- Knowledge: use injected KNOWLEDGE BLOCK only; never read knowledge.md
+- Commits: never broken code; format `grechman(step N)`; never push main/master
+- Packages/schema: new package needed → BLOCKED + no install; no schema changes unless in assigned steps
+- Bugs outside scope: log to DISCOVERED_ISSUES, do not fix; run only modified-file tests
+- Skills: TDD before new code; systematic-debugging on failure; verification-before-completion every iteration
+- Stuck: max 2 approaches per step; then write FAILURE result + AGENT_BLOCKED
 
 Result file `grechman-result-[ID].md`:
 - SUCCESS: WORK_PACKAGE / STATUS / COMMIT_SHA / FILES_CREATED / FILES_MODIFIED / TESTS_PASSING / VERIFICATION_OUTPUT (3 lines) / NEW_KNOWLEDGE / DISCOVERED_ISSUES
@@ -209,3 +231,15 @@ git commit -m "grechman(done): session complete"  # push if --github on
 6. Validate remaining steps vs remaining iterations (Step 1 rule)
 7. Check `git log --fixed-strings --grep="grechman(knowledge)"` — if no commit: run Step 4 batch commit first
 8. Skip to Step 5
+
+---
+
+## GLOSSARY
+
+- **step** — a numbered unit of the plan (from Step 2); one commit per step on success
+- **phase** — one sequential stage in SEQUENTIAL_SUBAGENTS mode; one agent per phase
+- **WP (work package)** — a group of steps assigned to one agent branch in PARALLEL/SEQUENTIAL modes
+- **iteration** — one cycle of the ralph-loop (identify step → implement → verify → commit)
+- **approach** — a distinct implementation strategy for a step; max 2 before BLOCKED
+- **agent** — a dispatched Claude instance executing a single WP inside its own worktree
+- **orchestrator** — the controlling Claude instance that dispatches agents and writes handoffs
