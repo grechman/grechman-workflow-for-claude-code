@@ -16,7 +16,7 @@ Conditional:
 | Skill | When |
 |---|---|
 | `superpowers:brainstorming` | unless `--pre-specified on` |
-| `superpowers:using-git-worktrees` | hard complexity |
+| `superpowers:using-git-worktrees` | hard complexity OR PARALLEL mode |
 | `frontend-design` | UI/CSS/components/design |
 | `humanizer` | `--github on` |
 | `pr-review-toolkit:review-pr` | reviewing existing PR |
@@ -92,6 +92,8 @@ Analyze plan dependencies. Write grechman-dispatch.md: mode, preamble step list,
 **SEQUENTIAL_SUBAGENTS** (`superpowers:subagent-driven-development`) when: 3+ ordered stages with distinct handoff artifacts (schema→models→API→tests) · OR 20+ tool calls accumulated in context · OR switching work modes.
 **RALPH_LOOP** (default): tightly coupled steps · ≤ 8 steps · no natural decomposition · touches shared infra.
 
+**Pre-dispatch file conflict check (PARALLEL only):** Before showing the dispatch prompt, extract every path in `files_create` and `files_modify` across ALL work packages. If any path appears in more than one WP: output `⛔ FILE CONFLICT IN DISPATCH` · list each conflicting path and which WPs claim it · force mode to SEQUENTIAL_SUBAGENTS or RALPH_LOOP · rewrite grechman-dispatch.md · do NOT proceed with PARALLEL. Only show dispatch prompt after this check passes.
+
 Show and wait for Y before any code runs:
 `⚙️ Mode: [X] · Preamble: [steps] · Packages: [WP-A: steps X–Y] · Epilogue: [steps] · Budget: ~N iters — Proceed? Y / N / adjust`
 
@@ -101,11 +103,16 @@ Run preamble steps in ralph-loop (`--max-iterations <max>`). Record `PREAMBLE_IT
 SEQUENTIAL_SUBAGENTS: exclude preamble steps from Phase 1's assignment.
 
 ### 5c. Create agent branches (PARALLEL only)
-`git checkout -b grechman/<slug>-wp-a $DISPATCH_SHA && git checkout grechman/<slug>` — repeat per WP.
+For each work package, in order:
+1. Create branch: `git checkout -b grechman/<slug>-wp-<id> $DISPATCH_SHA && git checkout grechman/<slug>`
+2. Create worktree: `git worktree add grechman-wp-<id>-worktree grechman/<slug>-wp-<id>`
+3. Record worktree path in grechman-dispatch.md under the WP entry: `worktree: grechman-wp-<id>-worktree`
+
+Each agent must run exclusively inside its assigned worktree directory. FORBIDDEN: any agent reading or writing paths outside its own worktree.
 If DISPATCH_SHA out of scope: `grep 'Dispatch SHA:' CLAUDE.md | awk '{print $NF}'`
 
 ### 5d. Build agent prompts
-Each prompt must include: agent ID + mode + DISPATCH_SHA + assigned branch · exact plan steps assigned · file lists (CREATE / MODIFY) · FORBIDDEN writes: CLAUDE.md, knowledge.md, grechman-dispatch.md, other agents' result files · "use KNOWLEDGE BLOCK below, do NOT read knowledge.md" · KNOWLEDGE BLOCK (relevant entries only).
+Each prompt must include: agent ID + mode + DISPATCH_SHA + assigned branch · exact plan steps assigned · file lists (CREATE / MODIFY) · FORBIDDEN writes: CLAUDE.md, knowledge.md, grechman-dispatch.md, other agents' result files · "use KNOWLEDGE BLOCK below, do NOT read knowledge.md" · KNOWLEDGE BLOCK (scoped: include only entries whose library appears in the steps or files assigned to this WP; for each excluded entry add a comment line `# [LibraryX excluded — not referenced in this WP]` so the agent knows what was withheld).
 
 Constraints: never commit broken code · format `grechman(step N)` · new package needed → write BLOCKED to result file, no install · no schema changes unless in steps · out-of-scope bugs → DISCOVERED_ISSUES, don't fix · run only modified-file tests.
 Skills: TDD before any new code · systematic-debugging on failures · verification-before-completion every iteration.
@@ -140,10 +147,11 @@ Per iteration:
 7. Commit `grechman(step N): <desc>` · write Last Stable SHA to CLAUDE.md
 8. If UI + Playwright MCP: navigate/interact/screenshot — infra failure: log+skip; UI bug: treat as verification failure (go back to 6)
 9. Push if `--github on`
+10. Every 10 iterations: evaluate `completed_steps / total_steps`. If `completed_steps < total_steps × 0.4` AND `iterations_remaining < iterations_used` → write fallback + output `GRECHMAN BLOCKED: budget rate insufficient (completed <X>/<Y> steps at iteration <N>)` + STOP. Do NOT continue burning budget on a trajectory that cannot complete.
 
 Rollback: `STABLE=$(git log --oneline --fixed-strings --grep="grechman(step" | head -1 | awk '{print $1}')` · if empty → write fallback + `GRECHMAN BLOCKED: no stable commit` + STOP · else `git reset --hard $STABLE` → write fallback → `GRECHMAN BLOCKED: <reason>`. Max 2 approaches per step.
 
-Stuck (design, not test): try 1 alt → still stuck: write fallback + `GRECHMAN BLOCKED`. Ask about scope changes, not implementation.
+Stuck (design, not test): try exactly 1 alternative approach → if still blocked after that single attempt: write fallback + `GRECHMAN BLOCKED: design blocked on step N`. Ask about scope changes, not implementation. Never attempt a third approach on the same step.
 Done → output `GRECHMAN COMPLETE` only when all steps committed · final verification passed · no hardcoded secrets · follows existing patterns · nothing beyond task scope.
 
 ### 5g. Consolidation (PARALLEL + SEQUENTIAL_SUBAGENTS)
@@ -151,11 +159,11 @@ All SUCCESS → merge each WP into session branch + verify. On conflict: `git me
 
 Failure: one failed + independent → merge successes + retry failed as ralph-loop. One failed + dependent OR multiple failed → abandon all → `git reset --hard $DISPATCH_SHA` (read from CLAUDE.md if var gone) → write fallback → restart all in ralph-loop. Partial (PARTIAL_SAFE_TO_MERGE: true) → merge + add remaining steps to epilogue front.
 
-After merges: write consolidated CLAUDE.md entry (WPs/SHAs/files) · merge NEW_KNOWLEDGE into knowledge.md.
+After merges: write consolidated CLAUDE.md entry (WPs/SHAs/files) · merge NEW_KNOWLEDGE into knowledge.md · collect all DISCOVERED_ISSUES lines from every grechman-result-WP-*.md into `grechman-discovered-issues.md` (one issue per line, prefixed with source WP ID); skip if all result files have empty DISCOVERED_ISSUES.
 
 Epilogue: PARALLEL budget = `max-iterations − PREAMBLE_ITERS_USED`; SEQUENTIAL_SUBAGENTS budget = `max-iterations − SUM(all phase iterations)`. Use `--max-iterations $EPILOGUE_BUDGET`. If ≤ 2: warn + ask before proceeding.
 
-After epilogue: delete grechman-dispatch.md · all grechman-result-WP-*.md · grechman-handoff.md.
+After epilogue: remove all worktrees (`git worktree remove grechman-wp-<id>-worktree --force` per WP) · delete grechman-dispatch.md · all grechman-result-WP-*.md · grechman-handoff.md.
 
 ---
 
@@ -183,7 +191,7 @@ git add CLAUDE.md
 git commit -m "grechman(done): session complete"  # push if --github on
 ```
 
-**6e. Delivery:** `superpowers:finishing-a-development-branch` → merge / PR / keep / discard. Output PR URL if `--github on` and PR created.
+**6e. Delivery:** `superpowers:finishing-a-development-branch` → merge / PR / keep / discard. Output PR URL if `--github on` and PR created. If `grechman-discovered-issues.md` exists and is non-empty: output its contents (each line prefixed `⚠️ DISCOVERED:`), then ask: "These issues were found out-of-scope during execution. Run a follow-up `/grechman` for any? Y/N" — delete the file after displaying regardless of answer.
 
 ---
 
@@ -195,7 +203,7 @@ git commit -m "grechman(done): session complete"  # push if --github on
 **Resume (`--resume`):**
 1. Step 0a only
 2. Read grechman-fallback.md + CLAUDE.md
-3. Apply Step 4 staleness rules to knowledge.md (< 90 days → use; stale/missing → re-query; version-pinned → always use)
+3. Per library entry in knowledge.md: check its `date queried` field individually. < 90 days → use as-is; stale or missing entry → re-query that library only; version-pinned → always use. Do not re-query entries that are still fresh.
 4. MCP Memory query: `"<project> architecture decisions constraints"`
 5. Build KNOWLEDGE BLOCK (include memory context from step 4)
 6. Validate remaining steps vs remaining iterations (Step 1 rule)
