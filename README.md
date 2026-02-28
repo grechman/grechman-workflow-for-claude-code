@@ -50,6 +50,8 @@ Uses these if they're there:
 - `code-review:code-review` — reviewing existing PRs
 - Playwright MCP — browser/frontend tasks
 - MCP Memory, Sequential Thinking MCP, Desktop Commander MCP
+- depwire MCP — dependency graph, blast-radius conflict detection, entity scoping
+- `adr-tools` — architecture decision records (created in Step 6d)
 
 ---
 
@@ -112,13 +114,86 @@ If it hits the iteration limit, a merge conflict, a missing package, or a rollba
 
 ---
 
+## Ontology System
+
+Grechman can maintain a structured model of your project so agents don't start from zero each session.
+
+### Setup
+
+```bash
+# 1. Install the ontology command (same way as grechman.md)
+cp .claude/commands/grechman-ontology.md ~/.claude/commands/
+
+# 2. Optional: install depwire for dependency graph analysis
+claude mcp add depwire -- npx -y depwire-cli mcp
+
+# 3. Optional: install adr-tools for architecture decision records
+npm install -g adr-tools
+adr init doc/adr  # run once in your project root
+```
+
+### Create your first ontology
+
+```bash
+/grechman-ontology
+```
+
+This interviews you and auto-extracts what it can from your codebase (package.json, tsconfig, Supabase schema if MCP is available). Creates `ontology.yaml` in your project root.
+
+### Update after schema changes
+
+```bash
+/grechman-ontology --diff
+```
+
+Re-extracts the `_generated` block, preserves your `_manual` block unchanged.
+
+### What gets captured automatically during sessions
+
+Every grechman session reads `ontology.yaml` and:
+- Injects relevant context into each agent's KNOWLEDGE BLOCK
+- Appends new conventions when a step establishes a reusable pattern
+- Appends rejected approaches when a step gets blocked
+
+### ontology.yaml structure
+
+```yaml
+_generated:           # auto-extracted, overwritten by --diff
+  last_updated: "2026-02-28"
+  stack:
+    framework: "next@14.2.0"
+    database: "supabase-postgres"
+  entities:
+    Post:
+      source: "public.posts"
+      rls: true
+      constraints: ["INSERT only via Edge Function post-create"]
+
+_manual:              # append-only, written by agents and you
+  conventions:
+    - "Supabase client only in server components"
+  decisions:
+    - "Use Supabase Auth over NextAuth — native RLS support"
+  rejected_approaches:
+    - step: 3
+      session: "2026-02-28"
+      approach: "Direct Postgres trigger for post creation"
+      reason: "Cannot add business logic in trigger"
+  constraints:
+    - "Never change DB schema without a migration file"
+```
+
+---
+
 ## Files
 
 | File | What it is |
 |---|---|
 | `CLAUDE.md` | Session log |
 | `knowledge.md` | Cached library docs |
+| `ontology.yaml` | Project domain model (Ontology System) |
 | `docs/plans/*.md` | Design docs and plans |
+| `doc/adr/*.md` | Architecture Decision Records (if adr-tools installed) |
 | `grechman-fallback.md` | Resume state |
 | `grechman-dispatch.md` | Work manifest (deleted when done) |
 

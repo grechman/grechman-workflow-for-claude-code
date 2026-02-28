@@ -23,6 +23,8 @@ Conditional:
 | `Playwright MCP` | UI/frontend/browser |
 | MCP Memory / Sequential Thinking MCP / Desktop Commander MCP | if installed |
 | `qodo-skills:get-qodo-rules` | if installed — run once in Step 0c, inject rules into all agent prompts |
+| `depwire MCP` | dependency graph, impact analysis, entity scoping — if installed |
+| `adr-tools` | `--github on` OR architectural decisions made during session — if installed |
 
 Optional missing → list adaptations, Y/N prompt, proceed if Y.
 
@@ -43,6 +45,10 @@ Output: `Task: [X]. Complexity: [X]. Git: [X]. GitHub: [X]. Iterations: [N].`
 If missing: create with sections Project (name/stack/entry points/dirs), Session Log, Completed Tasks, Architecture Decisions, Known Constraints. If exists: append session entry (task/complexity/params/branch=TBD/status=IN PROGRESS/skills/libraries=TBD).
 If MCP Memory: ONE read query `"<project> architecture decisions constraints"` → add under "From Memory". (Read-only; Step 2 writes are fine.) Do NOT commit yet.
 If `qodo-skills:get-qodo-rules`: invoke once → save rules summary; inject into KNOWLEDGE BLOCK in Step 4.
+
+### 0d. Ontology
+If `ontology.yaml` exists in project root: read it → store for Step 4 injection. Missing → skip silently.
+If depwire MCP: call `connect_repo` on project root → available for Step 4 entity scoping + Step 5a conflict check.
 
 ---
 
@@ -78,6 +84,7 @@ If MCP Memory: save entities Project/Task/Decision/Constraint with relations Pro
 Per library: < 90 days old → use; version-pinned → always use; missing/stale → `resolve-library-id` → `query-docs` → append to knowledge.md (library, date queried, version, key APIs, gotchas). > 200 lines → archive unused to `knowledge-archive.md`.
 
 Build KNOWLEDGE BLOCK: only entries for this task's libraries. Inject once into execution prompt — never re-read knowledge.md during execution.
+If `ontology.yaml` loaded (Step 0d): scope entities — if depwire: `get_file_context` for task files → include only referenced entities; else: all entities if <10, otherwise only entities whose names appear in task description/files. Append to KNOWLEDGE BLOCK as `# ONTOLOGY (scoped)`: full `_manual` block + scoped `_generated` entities. If depwire: also call `get_architecture_summary` → append as `# ARCHITECTURE GRAPH`.
 Update CLAUDE.md: `Libraries: [list]`
 **Batch commit 2 (skip if `--git off`):** `git add CLAUDE.md knowledge.md && git commit -m "grechman(knowledge): load library context"`
 
@@ -104,7 +111,7 @@ Analyze plan dependencies. Write grechman-dispatch.md: mode, preamble step list,
 **SEQUENTIAL_SUBAGENTS** (`superpowers:subagent-driven-development`) when: 3+ ordered stages with distinct handoff artifacts (schema→models→API→tests) · OR 20+ tool calls accumulated in context · OR switching work modes.
 **RALPH_LOOP** (default): tightly coupled steps · ≤ 8 steps · no natural decomposition · touches shared infra.
 
-**Pre-dispatch file conflict check (PARALLEL only):** Before showing the dispatch prompt, extract every path in `files_create` and `files_modify` across ALL work packages. If any path appears in more than one WP: output `⛔ FILE CONFLICT IN DISPATCH` · list each conflicting path and which WPs claim it · force mode to SEQUENTIAL_SUBAGENTS or RALPH_LOOP · rewrite grechman-dispatch.md · do NOT proceed with PARALLEL. Only show dispatch prompt after this check passes.
+**Pre-dispatch file conflict check (PARALLEL only):** Before showing the dispatch prompt, extract every path in `files_create` and `files_modify` across ALL work packages. If any path appears in more than one WP: output `⛔ FILE CONFLICT IN DISPATCH` · list each conflicting path and which WPs claim it · force mode to SEQUENTIAL_SUBAGENTS or RALPH_LOOP · rewrite grechman-dispatch.md · do NOT proceed with PARALLEL. If depwire MCP: additionally call `impact_analysis` per WP file list → if blast radii overlap across WPs → ⛔ SEMANTIC CONFLICT IN DISPATCH (treat same as FILE CONFLICT). Only show dispatch prompt after this check passes.
 
 Show and wait for Y before any code runs:
 `⚙️ Mode: [X] · Preamble: [steps] · Packages: [WP-A: steps X–Y] · Epilogue: [steps] · Budget: ~N iters — Proceed? Y / N / adjust`
@@ -167,13 +174,14 @@ Per iteration:
 5a. If `code-simplifier` installed: run on files modified this iteration (post-verify only, pre-commit).
 6. If fail: systematic-debugging + 1 fix + re-verify → if still fail: ROLLBACK (below)
 7. Commit `grechman(step N): <desc>` · write Last Stable SHA to CLAUDE.md
+7a. If `ontology.yaml` loaded (Step 0d): did this step establish a non-obvious, reusable convention or architectural pattern? If yes → append to `_manual.conventions`: `- "<convention in one sentence>"  # step N, YYYY-MM-DD`. Be conservative — only write if genuinely reusable across sessions, not one-off implementation details.
 8. If UI + Playwright MCP: navigate/interact/screenshot — infra failure: log+skip; UI bug: treat as verification failure (go back to 6)
 9. Push if `--github on`
 10. Every 10 iterations: evaluate `completed_steps / total_steps`. If `completed_steps < total_steps × 0.4` AND `iterations_remaining < iterations_used` → write fallback + output `GRECHMAN BLOCKED: budget rate insufficient (completed <X>/<Y> steps at iteration <N>)` + STOP. Do NOT continue burning budget on a trajectory that cannot complete.
 
 Rollback: `STABLE=$(git log --oneline --fixed-strings --grep="grechman(step" | head -1 | awk '{print $1}')` · if empty → write fallback + `GRECHMAN BLOCKED: no stable commit` + STOP · else `git reset --hard $STABLE` → write fallback → `GRECHMAN BLOCKED: <reason>`. Max 2 approaches per step.
 
-Stuck (design, not test): try exactly 1 alternative approach → if still blocked after that single attempt: write fallback + `GRECHMAN BLOCKED: design blocked on step N`. Ask about scope changes, not implementation. Never attempt a third approach on the same step.
+Stuck (design, not test): try exactly 1 alternative approach → if still blocked after that single attempt: write fallback + `GRECHMAN BLOCKED: design blocked on step N`. If `ontology.yaml` loaded (Step 0d): append to `_manual.rejected_approaches`: `- step: N, session: YYYY-MM-DD, approach: "<what was tried>", reason: "<why blocked>"`. Ask about scope changes, not implementation. Never attempt a third approach on the same step.
 Done → output `GRECHMAN COMPLETE` only when all steps committed · final verification passed · no hardcoded secrets · follows existing patterns · nothing beyond task scope.
 
 ### 5g. Consolidation (PARALLEL + SEQUENTIAL_SUBAGENTS)
@@ -205,7 +213,7 @@ Update CLAUDE.md `Status: PAUSED`. Output: `Grechman paused. Last stable: <sha>.
 
 **6c. README (only if `--github on`):** update only sections affected by this task. `humanizer` if installed; else: no em dashes, no AI jargon, active voice, concrete examples.
 
-**6d. Final commit:** update CLAUDE.md (Completed Tasks: branch/steps/status/commits/files/design doc; Architecture Decisions; Known Constraints). If MCP Memory: update Project entity (completed task, modified files, new decisions).
+**6d. Final commit:** update CLAUDE.md (Completed Tasks: branch/steps/status/commits/files/design doc; Architecture Decisions; Known Constraints). If MCP Memory: update Project entity (completed task, modified files, new decisions). If `ontology.yaml` loaded (Step 0d): review `_manual` block with user — any new conventions or decisions from this session to capture? If `adr-tools` installed: `adr new "<decision title>"` for each significant architectural decision made this session; add resulting ADR number to `_manual.decisions`.
 ```bash
 # skip if --git off
 git add CLAUDE.md
