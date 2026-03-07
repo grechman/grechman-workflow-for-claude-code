@@ -85,6 +85,26 @@ Per library: < 90 days old → use; version-pinned → always use; missing/stale
 
 Build KNOWLEDGE BLOCK: only entries for this task's libraries. Inject into every agent prompt — agents must never re-read knowledge.md.
 If `ontology.yaml` loaded (Step 0d): scope entities — if depwire: `get_file_context` for task files → include only referenced entities; else: all entities if <10, otherwise only entities whose names appear in task description/files. Append to KNOWLEDGE BLOCK as `# ONTOLOGY (scoped)`: full `_manual` block + scoped `_generated` entities. If depwire: also call `get_architecture_summary` → append as `# ARCHITECTURE GRAPH`.
+
+If depwire MCP installed: append the following to every agent's KNOWLEDGE BLOCK as `# PRE-EDIT RULE (mandatory)`:
+```
+PRE-EDIT RULE (mandatory):
+Before editing any file:
+1. Call depwire: get_architecture_summary for <target_file>
+2. Review what depends on this file and what this file depends on
+3. Include affected files in your context
+4. If your change breaks a dependency — fix it in the same task or flag it in blockers field of your task report
+
+Before creating a new file:
+1. Check depwire if similar module already exists
+2. After creation — depwire will auto-update the graph (no manual action needed)
+
+Before deleting a file:
+1. Call depwire to check what depends on this file
+2. If dependents exist — do NOT delete without resolving dependencies first
+3. Document the deletion decision in your task report under `decision` field
+```
+Note: Do NOT write dependency information manually into `ontology.yaml`. ontology.yaml = human decisions, conventions, architectural choices. depwire = live dependency graph from actual code (always up to date automatically).
 Update CLAUDE.md: `Libraries: [list]`
 **Batch commit 2 (skip if `--git off`):** `git add CLAUDE.md knowledge.md && git commit -m "grechman(knowledge): load library context"`
 
@@ -119,6 +139,20 @@ Each phase prompt must include: phase ID + DISPATCH_SHA + branch · exact steps 
 - If `code-simplifier` installed: run post-verify, pre-commit
 - Ontology: if `ontology.yaml` in scope, after each commit append new reusable conventions to `_manual.conventions`; on BLOCKED append to `_manual.rejected_approaches`
 - Stuck: max 2 approaches per step → write FAILURE result + `AGENT_BLOCKED: <reason>`
+- **Task report (mandatory on completion):** write ONLY the following to `.grechman/task-reports/task_<N>.yaml`:
+  ```yaml
+  task_id: <N>
+  status: completed | blocked | partial
+  commits:
+    - <hash>: <message>
+  files_changed:
+    - <list of changed files>
+  tools_used:
+    - <list of tools used>
+  decision: <one sentence: what was done and how>
+  blockers: <if any, else null>
+  ```
+  Return to orchestrator ONLY: `"Task <N> complete. Report: .grechman/task-reports/task_<N>.yaml"`. Do NOT return reasoning, code, logs, or any other output.
 
 Result file `grechman-result-[ID].md`:
 - SUCCESS: PHASE / STATUS / COMMIT_SHA / FILES_CREATED / FILES_MODIFIED / TESTS_PASSING / VERIFICATION_OUTPUT (3 lines) / NEW_KNOWLEDGE / DISCOVERED_ISSUES
@@ -126,13 +160,19 @@ Result file `grechman-result-[ID].md`:
 
 ### 5d. Sequential dispatch + consolidation
 
-Phase by phase. Between phases, orchestrator writes `grechman-handoff.md`: phase from/to · HEAD_COMMIT · completed steps (1 line each) · key decisions (with file pointers) · files changed · remaining steps (exact text) · notes for next agent · known issues. Timeout: 30 min/phase → FAILURE → Step F.
+Phase by phase. Between phases, orchestrator reads `.grechman/task-reports/task_<N>.yaml` (not raw agent output) and writes `grechman-handoff.md`: phase from/to · HEAD_COMMIT · completed steps (1 line each) · key decisions (with file pointers) · files changed · remaining steps (exact text) · notes for next agent · known issues. Timeout: 30 min/phase → FAILURE → Step F.
 
 On all SUCCESS: full integration verification.
 Failure — one failed + independent: merge successes, retry failed phase as RALPH_LOOP. One failed + dependent OR multiple failed: `git reset --hard $DISPATCH_SHA` → write fallback → restart all as RALPH_LOOP.
 Partial (PARTIAL_SAFE_TO_MERGE: true): merge + prepend remaining steps to next phase.
 
 After all phases: write consolidated CLAUDE.md entry · merge NEW_KNOWLEDGE into knowledge.md · collect all DISCOVERED_ISSUES lines into `grechman-discovered-issues.md` (prefixed with source phase ID); skip if all empty.
+
+**Post-session aggregation (after ALL tasks complete):**
+1. Read all `.grechman/task-reports/task_<N>.yaml` files
+2. Write `.grechman/task-reports/session_summary.yaml` with aggregated results (all task IDs, statuses, commits, decisions)
+3. Append completed task `decision` fields to `ontology.yaml` under `_manual.decisions` (format: `- "<decision>" # session: <YYYY-MM-DD>, task: <N>`)
+4. Move entire `task-reports/` folder to `.grechman/sessions/<YYYY-MM-DD>/`
 
 Epilogue budget = `--budget − PREAMBLE_DISPATCHES_USED − phases_used`. If ≤ 2: warn + ask. After epilogue: delete grechman-dispatch.md · all grechman-result-*.md · grechman-handoff.md.
 
@@ -155,15 +195,29 @@ Each step = one `Agent(general-purpose)` dispatch. Orchestrator loops until all 
 - `superpowers:verification-before-completion` — mandatory before commit
 - If `code-simplifier` installed: run post-verify, pre-commit
 - If fail: `superpowers:systematic-debugging` + 1 fix + re-verify → if still fail: ROLLBACK
-- Commit `grechman(step N): <desc>` → return `STEP COMPLETE: <sha>`
+- Commit `grechman(step N): <desc>` → write `.grechman/task-reports/task_<N>.yaml` → return `STEP COMPLETE: <sha>`
 - If UI + Playwright MCP: navigate/interact/screenshot — infra failure: log+skip; UI bug: verification failure → back to debugging
 - If `ontology.yaml` loaded: if this commit established a non-obvious reusable convention → append to `_manual.conventions`: `- "<one sentence>" # step N, YYYY-MM-DD` (conservative — only genuinely cross-session patterns)
 - Max 2 approaches per step; if stuck: write grechman-fallback.md + append to `_manual.rejected_approaches` if ontology loaded → return `GRECHMAN BLOCKED: design blocked on step N`
+- **Task report (mandatory on each step completion):** write ONLY to `.grechman/task-reports/task_<N>.yaml`:
+  ```yaml
+  task_id: <N>
+  status: completed | blocked | partial
+  commits:
+    - <hash>: <message>
+  files_changed:
+    - <list of changed files>
+  tools_used:
+    - <list of tools used>
+  decision: <one sentence: what was done and how>
+  blockers: <if any, else null>
+  ```
+  Return to orchestrator ONLY: `"Task <N> complete. Report: .grechman/task-reports/task_<N>.yaml"`. Do NOT return reasoning, code, logs, or any other output.
 
 **Return protocol:**
-- `STEP COMPLETE: <sha>` — orchestrator records SHA to CLAUDE.md as Last Stable SHA, dispatches next step
+- `STEP COMPLETE: <sha>` — orchestrator reads `.grechman/task-reports/task_<N>.yaml`, records SHA to CLAUDE.md as Last Stable SHA, dispatches next step
 - `GRECHMAN BLOCKED: <reason>` — orchestrator writes fallback → Step F
-- `GRECHMAN COMPLETE` — all steps committed, final verification passed → Step 6
+- `GRECHMAN COMPLETE` — all steps committed, final verification passed → orchestrator runs post-session aggregation (reads all task YAMLs, writes session_summary.yaml, appends decisions to ontology.yaml, archives to `.grechman/sessions/<YYYY-MM-DD>/`) → Step 6
 
 **Rollback (agent executes if verification fails after both approaches):**
 `STABLE=$(git log --oneline --fixed-strings --grep="grechman(step" | head -1 | awk '{print $1}')`
