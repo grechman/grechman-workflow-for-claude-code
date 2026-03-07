@@ -93,7 +93,7 @@ At task start — call depwire get_architecture_summary ONCE for ALL files in yo
 
 Exemptions — do NOT call depwire for (exclude from the batch call):
 - Test files: *.test.*, *.spec.*, anything under __tests__/ or test/ directories
-- Config files: *.config.*, .env.example, root-level *.json (except package.json), root-level *.yaml
+- Config files: *.config.*, .env.example, root-level *.json (except package.json), root-level tool/CI config YAMLs (e.g. .github/, docker-compose.yml, renovate.yaml) — NOT schema/API/spec YAMLs (openapi.yaml, schema.yaml, etc.) which may have importers
 - Newly created files that did not exist before this task — no dependents exist yet by definition
 
 If a planned change breaks a dependency — fix it in the same task or flag it in the blockers field.
@@ -141,8 +141,10 @@ Each phase prompt must include: phase ID + DISPATCH_SHA + branch · exact steps 
   status: completed | blocked | partial
   commits:
     - <hash>: <message>
-  files_changed:
-    - <list of changed files>
+  files_created:
+    - <list of newly created files, or []>
+  files_modified:
+    - <list of modified files, or []>
   decision: <one sentence: what was done and how>
   blockers: <if any, else null>
   ```
@@ -151,7 +153,8 @@ Each phase prompt must include: phase ID + DISPATCH_SHA + branch · exact steps 
   Extended YAML fields (append only what applies — omit null fields):
   ```yaml
   # On success (optional if non-empty):
-  verification_summary: <one sentence on test results>
+  verification_output: |
+    <2-3 lines: test runner output, pass/fail counts, any warnings — enough for orchestrator to diagnose silent failures>
   new_knowledge: <one sentence if any>
   discovered_issues:
     - <list if any>
@@ -165,7 +168,7 @@ No separate `grechman-result-[ID].md` file — the YAML report is the single art
 
 ### 5d. Sequential dispatch + consolidation
 
-Phase by phase. Between phases, orchestrator reads `.grechman/task-reports/task_<N>.yaml` (not raw agent output). Write `grechman-handoff.md` ONLY if the phase report contains non-null `new_knowledge`, `discovered_issues`, or `blockers` — OR if the next phase's file set overlaps with `files_changed`. When written: phase from/to · HEAD_COMMIT · key decisions (with file pointers) · files changed · remaining steps (exact text) · notes for next agent · known issues. For clean phases with none of the above, skip the handoff file — the next agent uses the KNOWLEDGE BLOCK + dispatch manifest directly. Timeout: 30 min/phase → FAILURE → Step F.
+Phase by phase. Between phases, orchestrator reads `.grechman/task-reports/task_<N>.yaml` (not raw agent output). Write `grechman-handoff.md` whenever remaining steps > 0 (i.e., between all non-final phases). Minimum content always: phase from/to · HEAD_COMMIT · remaining steps (exact text from current plan — not stale dispatch manifest). Additional content when applicable: key decisions (with file pointers) · files changed · notes for next agent · known issues · new_knowledge · discovered_issues · blockers. Clean phases with none of the above write a minimal handoff (remaining steps + HEAD_COMMIT only). Timeout: 30 min/phase → FAILURE → Step F.
 
 On all SUCCESS: full integration verification.
 Failure — one failed + independent: merge successes, retry failed phase as RALPH_LOOP. One failed + dependent OR multiple failed: `git reset --hard $DISPATCH_SHA` → write fallback → restart all as RALPH_LOOP.
@@ -210,15 +213,17 @@ Each step = one `Agent(general-purpose)` dispatch. Orchestrator loops until all 
   status: completed | blocked | partial
   commits:
     - <hash>: <message>
-  files_changed:
-    - <list of changed files>
+  files_created:
+    - <list of newly created files, or []>
+  files_modified:
+    - <list of modified files, or []>
   decision: <one sentence: what was done and how>
   blockers: <if any, else null>
   ```
   Return to orchestrator ONLY: `"Task <N> complete. Report: .grechman/task-reports/task_<N>.yaml"`. Do NOT return reasoning, code, logs, or any other output.
 
 **Return protocol:**
-- `STEP COMPLETE: <sha> | <status>` — orchestrator records SHA directly from signal to CLAUDE.md as Last Stable SHA (no YAML file read between steps — full YAML is read in bulk during post-session aggregation only), dispatches next step
+- `STEP COMPLETE: <sha> | <status>` — orchestrator records SHA directly from signal to CLAUDE.md as Last Stable SHA; if status is `partial` or `blocked`, orchestrator MUST read the full YAML immediately before dispatching next step; otherwise full YAML is read in bulk during post-session aggregation only
 - `GRECHMAN BLOCKED: <reason>` — orchestrator writes fallback → Step F
 - `GRECHMAN COMPLETE` — all steps committed, final verification passed → orchestrator runs post-session aggregation (reads all task YAMLs, writes session_summary.yaml, appends decisions to ontology.yaml, archives to `.grechman/sessions/<YYYY-MM-DD>/`) → Step 6
 
