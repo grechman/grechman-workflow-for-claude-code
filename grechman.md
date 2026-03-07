@@ -89,20 +89,16 @@ If `ontology.yaml` loaded (Step 0d): scope entities — if depwire: `get_file_co
 If depwire MCP installed: append the following to every agent's KNOWLEDGE BLOCK as `# PRE-EDIT RULE (mandatory)`:
 ```
 PRE-EDIT RULE (mandatory):
-Before editing any file:
-1. Call depwire: get_architecture_summary for <target_file>
-2. Review what depends on this file and what this file depends on
-3. Include affected files in your context
-4. If your change breaks a dependency — fix it in the same task or flag it in blockers field of your task report
+At task start — call depwire get_architecture_summary ONCE for ALL files in your assigned set (CREATE + MODIFY), batched in a single call. Review the combined dependency context returned. Include all affected files in your working context. Do NOT call depwire again per-file during the task.
 
-Before creating a new file:
-1. Check depwire if similar module already exists
-2. After creation — depwire will auto-update the graph (no manual action needed)
+Exemptions — do NOT call depwire for (exclude from the batch call):
+- Test files: *.test.*, *.spec.*, anything under __tests__/ or test/ directories
+- Config files: *.config.*, .env.example, root-level *.json (except package.json), root-level *.yaml
+- Newly created files that did not exist before this task — no dependents exist yet by definition
 
-Before deleting a file:
-1. Call depwire to check what depends on this file
-2. If dependents exist — do NOT delete without resolving dependencies first
-3. Document the deletion decision in your task report under `decision` field
+If a planned change breaks a dependency — fix it in the same task or flag it in the blockers field.
+Before deleting a file: verify no dependents in the batch result above; if dependents exist — do NOT delete without resolving first. Document the decision under `decision` in your task report.
+After creating a new file: depwire auto-updates the graph — no manual action needed.
 ```
 Note: Do NOT write dependency information manually into `ontology.yaml`. ontology.yaml = human decisions, conventions, architectural choices. depwire = live dependency graph from actual code (always up to date automatically).
 Update CLAUDE.md: `Libraries: [list]`
@@ -147,20 +143,29 @@ Each phase prompt must include: phase ID + DISPATCH_SHA + branch · exact steps 
     - <hash>: <message>
   files_changed:
     - <list of changed files>
-  tools_used:
-    - <list of tools used>
   decision: <one sentence: what was done and how>
   blockers: <if any, else null>
   ```
   Return to orchestrator ONLY: `"Task <N> complete. Report: .grechman/task-reports/task_<N>.yaml"`. Do NOT return reasoning, code, logs, or any other output.
 
-Result file `grechman-result-[ID].md`:
-- SUCCESS: PHASE / STATUS / COMMIT_SHA / FILES_CREATED / FILES_MODIFIED / TESTS_PASSING / VERIFICATION_OUTPUT (3 lines) / NEW_KNOWLEDGE / DISCOVERED_ISSUES
-- FAILURE: PHASE / STATUS / FAILURE_REASON / LAST_CLEAN_COMMIT / PARTIAL_SAFE_TO_MERGE / FILES_BEFORE_FAILURE
+  Extended YAML fields (append only what applies — omit null fields):
+  ```yaml
+  # On success (optional if non-empty):
+  verification_summary: <one sentence on test results>
+  new_knowledge: <one sentence if any>
+  discovered_issues:
+    - <list if any>
+  # On failure/blocked:
+  failure_reason: <reason>
+  last_clean_commit: <SHA>
+  partial_safe_to_merge: true | false
+  ```
+
+No separate `grechman-result-[ID].md` file — the YAML report is the single artifact.
 
 ### 5d. Sequential dispatch + consolidation
 
-Phase by phase. Between phases, orchestrator reads `.grechman/task-reports/task_<N>.yaml` (not raw agent output) and writes `grechman-handoff.md`: phase from/to · HEAD_COMMIT · completed steps (1 line each) · key decisions (with file pointers) · files changed · remaining steps (exact text) · notes for next agent · known issues. Timeout: 30 min/phase → FAILURE → Step F.
+Phase by phase. Between phases, orchestrator reads `.grechman/task-reports/task_<N>.yaml` (not raw agent output). Write `grechman-handoff.md` ONLY if the phase report contains non-null `new_knowledge`, `discovered_issues`, or `blockers` — OR if the next phase's file set overlaps with `files_changed`. When written: phase from/to · HEAD_COMMIT · key decisions (with file pointers) · files changed · remaining steps (exact text) · notes for next agent · known issues. For clean phases with none of the above, skip the handoff file — the next agent uses the KNOWLEDGE BLOCK + dispatch manifest directly. Timeout: 30 min/phase → FAILURE → Step F.
 
 On all SUCCESS: full integration verification.
 Failure — one failed + independent: merge successes, retry failed phase as RALPH_LOOP. One failed + dependent OR multiple failed: `git reset --hard $DISPATCH_SHA` → write fallback → restart all as RALPH_LOOP.
@@ -174,7 +179,7 @@ After all phases: write consolidated CLAUDE.md entry · merge NEW_KNOWLEDGE into
 3. Append completed task `decision` fields to `ontology.yaml` under `_manual.decisions` (format: `- "<decision>" # session: <YYYY-MM-DD>, task: <N>`)
 4. Move entire `task-reports/` folder to `.grechman/sessions/<YYYY-MM-DD>/`
 
-Epilogue budget = `--budget − PREAMBLE_DISPATCHES_USED − phases_used`. If ≤ 2: warn + ask. After epilogue: delete grechman-dispatch.md · all grechman-result-*.md · grechman-handoff.md.
+Epilogue budget = `--budget − PREAMBLE_DISPATCHES_USED − phases_used`. If ≤ 2: warn + ask. After epilogue: delete grechman-dispatch.md · grechman-handoff.md (if it exists).
 
 ### 5e. Agent iteration loop (RALPH_LOOP)
 
@@ -195,7 +200,7 @@ Each step = one `Agent(general-purpose)` dispatch. Orchestrator loops until all 
 - `superpowers:verification-before-completion` — mandatory before commit
 - If `code-simplifier` installed: run post-verify, pre-commit
 - If fail: `superpowers:systematic-debugging` + 1 fix + re-verify → if still fail: ROLLBACK
-- Commit `grechman(step N): <desc>` → write `.grechman/task-reports/task_<N>.yaml` → return `STEP COMPLETE: <sha>`
+- Commit `grechman(step N): <desc>` → write `.grechman/task-reports/task_<N>.yaml` → return `STEP COMPLETE: <sha> | <status>`
 - If UI + Playwright MCP: navigate/interact/screenshot — infra failure: log+skip; UI bug: verification failure → back to debugging
 - If `ontology.yaml` loaded: if this commit established a non-obvious reusable convention → append to `_manual.conventions`: `- "<one sentence>" # step N, YYYY-MM-DD` (conservative — only genuinely cross-session patterns)
 - Max 2 approaches per step; if stuck: write grechman-fallback.md + append to `_manual.rejected_approaches` if ontology loaded → return `GRECHMAN BLOCKED: design blocked on step N`
@@ -207,15 +212,13 @@ Each step = one `Agent(general-purpose)` dispatch. Orchestrator loops until all 
     - <hash>: <message>
   files_changed:
     - <list of changed files>
-  tools_used:
-    - <list of tools used>
   decision: <one sentence: what was done and how>
   blockers: <if any, else null>
   ```
   Return to orchestrator ONLY: `"Task <N> complete. Report: .grechman/task-reports/task_<N>.yaml"`. Do NOT return reasoning, code, logs, or any other output.
 
 **Return protocol:**
-- `STEP COMPLETE: <sha>` — orchestrator reads `.grechman/task-reports/task_<N>.yaml`, records SHA to CLAUDE.md as Last Stable SHA, dispatches next step
+- `STEP COMPLETE: <sha> | <status>` — orchestrator records SHA directly from signal to CLAUDE.md as Last Stable SHA (no YAML file read between steps — full YAML is read in bulk during post-session aggregation only), dispatches next step
 - `GRECHMAN BLOCKED: <reason>` — orchestrator writes fallback → Step F
 - `GRECHMAN COMPLETE` — all steps committed, final verification passed → orchestrator runs post-session aggregation (reads all task YAMLs, writes session_summary.yaml, appends decisions to ontology.yaml, archives to `.grechman/sessions/<YYYY-MM-DD>/`) → Step 6
 
