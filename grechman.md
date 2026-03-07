@@ -146,6 +146,8 @@ Each phase prompt must include: phase ID + DISPATCH_SHA + branch · exact steps 
   files_modified:
     - <list of modified files, or []>
   decision: <one sentence: what was done and how>
+  tools_used:
+    - <list of superpowers/MCP tools actually invoked>
   blockers: <if any, else null>
   ```
   Return to orchestrator ONLY: `"Task <N> complete. Report: .grechman/task-reports/task_<N>.yaml"`. Do NOT return reasoning, code, logs, or any other output.
@@ -218,6 +220,8 @@ Each step = one `Agent(general-purpose)` dispatch. Orchestrator loops until all 
   files_modified:
     - <list of modified files, or []>
   decision: <one sentence: what was done and how>
+  tools_used:
+    - <list of superpowers/MCP tools actually invoked>
   blockers: <if any, else null>
   ```
   Return to orchestrator ONLY: `"Task <N> complete. Report: .grechman/task-reports/task_<N>.yaml"`. Do NOT return reasoning, code, logs, or any other output.
