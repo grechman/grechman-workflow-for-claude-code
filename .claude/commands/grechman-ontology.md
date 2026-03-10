@@ -15,7 +15,6 @@ Generates and maintains `ontology.yaml` — a structured, machine-readable model
 - `--init` (default) — full interview, creates ontology.yaml from scratch
 - `--diff` — re-extracts `_generated` block from live sources, preserves `_manual` block untouched
 - `--scope <file1> [file2...]` — prints the scoped ONTOLOGY excerpt for given files (used internally by grechman)
-- `--session-import <path>` — import decisions from a session_summary.yaml into `_manual.decisions`
 
 ---
 
@@ -43,22 +42,6 @@ If `--diff` is set:
 4. Show diff summary: what changed in `_generated`.
 5. Ask: "Any updates to `_manual` while we're here? Y/N" — if Y: go to INTERVIEW (Phase 2).
 6. Done.
-
----
-
-## FLAG: --session-import
-
-If `--session-import <path>` is set:
-1. Read the specified `session_summary.yaml` file
-2. Extract all `decision` fields from tasks with `status: completed`
-3. Append each decision to `_manual.decisions` in `ontology.yaml` with format:
-   ```yaml
-   - "<decision text>"  # session: <YYYY-MM-DD>, task: <N>
-   ```
-4. Preserve all existing `_manual` content byte-for-byte — only append, never overwrite
-5. Output: `Imported N decisions from session <date> into ontology.yaml`
-
-Then EXIT. Do not proceed to interview or generation.
 
 ---
 
