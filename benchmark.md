@@ -28,16 +28,16 @@ baseline_steps = 8
 
 | Category             | Score (1–10) | Weight |
 | -------------------- | ------------ | ------ |
-| Cost Efficiency      | 7            | 0.12   |
+| Cost Efficiency      | 8            | 0.12   |
 | Usability            | 8            | 0.08   |
-| Error Handling       | 8            | 0.12   |
+| Error Handling       | 9            | 0.12   |
 | Autonomy             | 8            | 0.15   |
 | Determinism          | 8            | 0.08   |
 | Safety               | 9            | 0.12   |
 | Traceability         | 9            | 0.08   |
 | Scalability          | 8            | 0.10   |
 | Extensibility        | 8            | 0.07   |
-| Verification Quality | 8            | 0.08   |
+| Verification Quality | 9            | 0.08   |
 
 Total weight = **1.00**
 
@@ -298,46 +298,46 @@ final_score = Σ(score × weight)
 
 | Category             | Score | Weight | Contribution |
 | -------------------- | ----- | ------ | ------------ |
-| Cost Efficiency      | 7     | 0.12   | 0.84         |
+| Cost Efficiency      | 8     | 0.12   | 0.96         |
 | Usability            | 8     | 0.08   | 0.64         |
-| Error Handling       | 8     | 0.12   | 0.96         |
+| Error Handling       | 9     | 0.12   | 1.08         |
 | Autonomy             | 8     | 0.15   | 1.20         |
 | Determinism          | 8     | 0.08   | 0.64         |
 | Safety               | 9     | 0.12   | 1.08         |
 | Traceability         | 9     | 0.08   | 0.72         |
 | Scalability          | 8     | 0.10   | 0.80         |
 | Extensibility        | 8     | 0.07   | 0.56         |
-| Verification Quality | 8     | 0.08   | 0.64         |
-| **TOTAL**            |       | **1.00** | **8.08**   |
+| Verification Quality | 9     | 0.08   | 0.72         |
+| **TOTAL**            |       | **1.00** | **8.40**   |
 
 ## Rationale
 
-**Cost Efficiency — 7**
-Dispatch budget is explicit (15/25) and execution mode selection (RALPH_LOOP / SEQUENTIAL / PARALLEL) minimizes waste. The context overflow fix in `grechman-update.md` (structured YAML reports, ~500 token per task cap) directly addresses token inefficiency. Score is 7 rather than higher because actual dispatch efficiency is only verifiable at runtime — the budget controls are sound but not independently observable.
+**Cost Efficiency — 8**
+The orchestrator is explicitly a thin dispatcher: agents return only a single-line acknowledgment and write structured YAML to `.grechman/task-reports/`; the orchestrator reads only the fields it needs. This keeps orchestrator context flat regardless of task count. Knowledge caching (90-day freshness, version-pin bypass, >200-line archiving) prevents redundant doc fetches. Budget gate (`step_count × 1.5 ≤ budget`) prevents over-commitment before coding starts. Not 9 because actual dispatch efficiency is only verifiable at runtime.
 
 **Usability — 8**
-`/grechman <task>` is straightforward with well-documented flags, defaults, and concrete usage examples. Fallback/resume lowers recovery friction significantly. Small deduction: two hard-required skills (`ralph-loop`, `superpowers:*`) add a one-time setup hurdle not handled automatically.
+`/grechman <task>` with sensible defaults requires minimal configuration. The orchestrator state block is printed between every turn for full visibility. Fallback gives the exact resume command. One friction point: the hard requirement on `superpowers:*` adds setup overhead; a missing skill causes a hard stop with no graceful degradation path.
 
-**Error Handling — 8**
-Covers the main failure classes: iteration limit, merge conflicts, missing packages, unrecoverable rollbacks. Fallback file captures last stable SHA and remaining work; resume is a single command. Task-level `blockers` field gives structured per-task fault reporting. Not 9 because rollback itself (reverting to last stable SHA) is described but the mechanism isn't fully specified in the prompts.
+**Error Handling — 9**
+Two-strike rule is explicit: max 2 approaches per step, then rollback to last stable SHA via `git reset --hard` using `git log --grep` to find the SHA automatically. SEQUENTIAL mode adds two additional recovery paths: failed independent phases are retried as RALPH; failed dependent phases reset to `$DISPATCH_SHA`. `partial_safe_to_merge` flag allows salvaging partial work. Fallback agent commits state before stopping so resume is always clean. Missing packages block immediately rather than partially installing.
 
 **Autonomy — 8**
-Plans, branches, fetches docs, implements, reviews, and commits without human input. One intentional pause: execution mode confirmation before running. This is a sensible checkpoint, not a weakness. `--pre-specified on` removes brainstorming if the operator already has a plan. Near-fully autonomous for most tasks.
+The full workflow — plan, branch, fetch docs, implement, TDD, verify, review, commit, wrap up — executes without human input. Two intentional interactive checkpoints: (1) mode/step confirmation before coding, (2) ontology review in finish step. Both are deliberate design choices, not gaps. `--pre-specified on` and `--github on` reduce the interactive surface further.
 
 **Determinism — 8**
-Step ordering is fixed (Steps 0–7), branch naming is `grechman/<slug>`, commit format is `grechman(step N): <description>`, and three batch commits always occur. Execution mode is chosen by explicit rule, not randomly. Minor variability possible in LLM-driven brainstorming and planning output across runs.
+Step ordering is fixed (Steps 0–F), branch naming is `grechman/<slug>`, commit format is `grechman(step N): <desc>`, and three batch commits (`init`, `knowledge`, `done`) always occur. Mode selection in Step 4 uses explicit rules (step count, domain count, phase boundaries). YAML report schema is enforced. Minor variability possible in LLM-generated plan content across runs.
 
 **Safety — 9**
-`main`/`master` is never touched. Commits are gated on verification. Security review covers XSS, SQL injection, exposed paths, auth logic, secrets, rate limiting. Clean working-tree check precedes branching. Depwire pre-edit dependency check prevents silent downstream breakage. No observable unsafe events in the design.
+`main`/`master` is forbidden in the agent contract. Clean tree check and branch collision check run before branching. `superpowers:verification-before-completion` is mandatory before every commit. Security review is file-type scoped and blocks on unfixed issues — never "document and continue". Rollback to stable SHA is scripted, not ad-hoc. No observable unsafe events in the design.
 
 **Traceability — 9**
-`CLAUDE.md` session log, structured commit messages, `docs/plans/*.md` design artifacts, ADR support, fallback file with last stable SHA, per-task YAML reports, and session summary YAML together make the session fully reconstructable. Score is 9 rather than 10 because log hygiene depends on agents consistently following instructions across all steps.
+Per-task YAML reports, `session_summary.yaml`, CLAUDE.md session log, structured commit messages, `docs/plans/` design docs, ADR support, and fallback file with last stable SHA together make any session fully reconstructable. Sessions are archived to `.grechman/sessions/YYYY-MM-DD/`. Discovered issues are collected into `grechman-discovered-issues.md` and surfaced to the user at finish. Score is 9 rather than 10 because log fidelity depends on agents consistently following the report schema.
 
 **Scalability — 8**
-Three execution modes map to task complexity. Hard mode extends the iteration cap to 25. Context overflow fix keeps orchestrator memory flat across 14+ sequential tasks. `scale_factor` = 25 / 8 = 3.1×. Does not yet describe horizontal scaling (parallel orchestrators, multi-repo tasks) so 9–10 is not warranted.
+SEQUENTIAL_SUBAGENTS mode handles multi-domain, multi-phase work with explicit handoff files between phases. Worktrees are used for hard complexity. Orchestrator context stays flat regardless of phase count because agents return minimal YAML. `scale_factor` = 25 / 8 = 3.1×. Does not address parallel orchestrators or multi-repo tasks, so 9–10 is not warranted.
 
 **Extensibility — 8**
-Optional skills and MCPs are checked at startup and used if present (graceful degradation). Pattern is clean: new capability = new MCP or skill, no core changes needed. Ontology system and depwire show the integration model works. Minor friction: no plugin manifest or formal extension API; extending requires editing prompt files directly.
+All non-core capabilities are optional: graceful degradation if depwire, Playwright, Sequential Thinking MCP, Memory MCP, qodo, humanizer, or adr-tools are absent. The pattern is clean — new capability = new MCP or skill added to the check table in Step 0. Ontology and depwire integrations demonstrate the model working end-to-end. Minor friction: no formal extension manifest; adding a capability requires editing prompt files directly.
 
-**Verification Quality — 8**
-Security review is mandatory before final commit (not skippable). Commits are blocked until verification passes. Depwire pre-edit hook catches dependency breakage before commit. Structured task reports surface blockers early. Does not enforce test-first development or automated test runs, which would push this toward 9–10.
+**Verification Quality — 9**
+TDD is mandated in the agent contract: write failing test → implement → verify pass via `superpowers:test-driven-development`. `superpowers:verification-before-completion` is mandatory before every commit. Security review checks XSS, SQL injection, parameterized queries, auth logic, rate limiting, and hardcoded secrets — scoped to actual file types changed. Depwire pre-edit call catches dependency breakage before code is written. Discovered issues across all tasks are aggregated and shown to the user. Not 10 because test suite scope is intentionally limited (changed files only, not full suite), so integration regressions outside the changed set are not caught.
