@@ -28,16 +28,16 @@ baseline_steps = 8
 
 | Category             | Score (1–10) | Weight |
 | -------------------- | ------------ | ------ |
-| Cost Efficiency      |              | 0.12   |
-| Usability            |              | 0.08   |
-| Error Handling       |              | 0.12   |
-| Autonomy             |              | 0.15   |
-| Determinism          |              | 0.08   |
-| Safety               |              | 0.12   |
-| Traceability         |              | 0.08   |
-| Scalability          |              | 0.10   |
-| Extensibility        |              | 0.07   |
-| Verification Quality |              | 0.08   |
+| Cost Efficiency      | 7            | 0.12   |
+| Usability            | 8            | 0.08   |
+| Error Handling       | 8            | 0.12   |
+| Autonomy             | 8            | 0.15   |
+| Determinism          | 8            | 0.08   |
+| Safety               | 9            | 0.12   |
+| Traceability         | 9            | 0.08   |
+| Scalability          | 8            | 0.10   |
+| Extensibility        | 8            | 0.07   |
+| Verification Quality | 8            | 0.08   |
 
 Total weight = **1.00**
 
@@ -293,3 +293,51 @@ Scoring guidance:
 ```text
 final_score = Σ(score × weight)
 ```
+
+## Calculation
+
+| Category             | Score | Weight | Contribution |
+| -------------------- | ----- | ------ | ------------ |
+| Cost Efficiency      | 7     | 0.12   | 0.84         |
+| Usability            | 8     | 0.08   | 0.64         |
+| Error Handling       | 8     | 0.12   | 0.96         |
+| Autonomy             | 8     | 0.15   | 1.20         |
+| Determinism          | 8     | 0.08   | 0.64         |
+| Safety               | 9     | 0.12   | 1.08         |
+| Traceability         | 9     | 0.08   | 0.72         |
+| Scalability          | 8     | 0.10   | 0.80         |
+| Extensibility        | 8     | 0.07   | 0.56         |
+| Verification Quality | 8     | 0.08   | 0.64         |
+| **TOTAL**            |       | **1.00** | **8.08**   |
+
+## Rationale
+
+**Cost Efficiency — 7**
+Dispatch budget is explicit (15/25) and execution mode selection (RALPH_LOOP / SEQUENTIAL / PARALLEL) minimizes waste. The context overflow fix in `grechman-update.md` (structured YAML reports, ~500 token per task cap) directly addresses token inefficiency. Score is 7 rather than higher because actual dispatch efficiency is only verifiable at runtime — the budget controls are sound but not independently observable.
+
+**Usability — 8**
+`/grechman <task>` is straightforward with well-documented flags, defaults, and concrete usage examples. Fallback/resume lowers recovery friction significantly. Small deduction: two hard-required skills (`ralph-loop`, `superpowers:*`) add a one-time setup hurdle not handled automatically.
+
+**Error Handling — 8**
+Covers the main failure classes: iteration limit, merge conflicts, missing packages, unrecoverable rollbacks. Fallback file captures last stable SHA and remaining work; resume is a single command. Task-level `blockers` field gives structured per-task fault reporting. Not 9 because rollback itself (reverting to last stable SHA) is described but the mechanism isn't fully specified in the prompts.
+
+**Autonomy — 8**
+Plans, branches, fetches docs, implements, reviews, and commits without human input. One intentional pause: execution mode confirmation before running. This is a sensible checkpoint, not a weakness. `--pre-specified on` removes brainstorming if the operator already has a plan. Near-fully autonomous for most tasks.
+
+**Determinism — 8**
+Step ordering is fixed (Steps 0–7), branch naming is `grechman/<slug>`, commit format is `grechman(step N): <description>`, and three batch commits always occur. Execution mode is chosen by explicit rule, not randomly. Minor variability possible in LLM-driven brainstorming and planning output across runs.
+
+**Safety — 9**
+`main`/`master` is never touched. Commits are gated on verification. Security review covers XSS, SQL injection, exposed paths, auth logic, secrets, rate limiting. Clean working-tree check precedes branching. Depwire pre-edit dependency check prevents silent downstream breakage. No observable unsafe events in the design.
+
+**Traceability — 9**
+`CLAUDE.md` session log, structured commit messages, `docs/plans/*.md` design artifacts, ADR support, fallback file with last stable SHA, per-task YAML reports, and session summary YAML together make the session fully reconstructable. Score is 9 rather than 10 because log hygiene depends on agents consistently following instructions across all steps.
+
+**Scalability — 8**
+Three execution modes map to task complexity. Hard mode extends the iteration cap to 25. Context overflow fix keeps orchestrator memory flat across 14+ sequential tasks. `scale_factor` = 25 / 8 = 3.1×. Does not yet describe horizontal scaling (parallel orchestrators, multi-repo tasks) so 9–10 is not warranted.
+
+**Extensibility — 8**
+Optional skills and MCPs are checked at startup and used if present (graceful degradation). Pattern is clean: new capability = new MCP or skill, no core changes needed. Ontology system and depwire show the integration model works. Minor friction: no plugin manifest or formal extension API; extending requires editing prompt files directly.
+
+**Verification Quality — 8**
+Security review is mandatory before final commit (not skippable). Commits are blocked until verification passes. Depwire pre-edit hook catches dependency breakage before commit. Structured task reports surface blockers early. Does not enforce test-first development or automated test runs, which would push this toward 9–10.
