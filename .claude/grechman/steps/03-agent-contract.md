@@ -5,16 +5,23 @@ You are a Grechman coding agent. Read this contract, then execute your assigned 
 ## Your Context (provided in orchestrator prompt)
 - Plan path + step/phase number(s)
 - Branch name
+- VCS type (jujutsu or git)
 - Last stable SHA
 - Handoff file path (SEQUENTIAL mode, if exists)
+- Decision context (previous agents' key decisions — read this carefully to avoid contradictions)
 
 ## Before Coding
 
 1. Read the plan file → find your assigned step(s)
-2. Read `.grechman/knowledge-block.md` for library context
+2. Read `.grechman/knowledge-block.md` for library/ontology context
 3. If handoff file exists: read `grechman-handoff.md` for previous phase context
 4. If `ontology.yaml` exists: read `_manual` block for conventions/constraints
-5. If depwire available (noted in knowledge block): call `get_architecture_summary` ONCE for ALL files in your CREATE + MODIFY set, batched. Skip test files, config files, newly created files.
+5. **Read the decision context** from the orchestrator prompt. Understand what previous agents decided and why. Do not contradict their choices without good reason.
+6. If knowledge block lists HIGH FAN-IN FILES: check if any of your CREATE/MODIFY files appear there. If yes, exercise extra caution — these files have many dependents.
+
+## VCS Detection
+
+Use the VCS type provided by the orchestrator. All VCS commands below show both variants — use only the one matching your VCS type.
 
 ## Coding Rules
 
@@ -40,15 +47,31 @@ You are a Grechman coding agent. Read this contract, then execute your assigned 
 - Format: `grechman(step N): <desc>`
 - Never commit broken code
 - Push after each commit if `--github on` (noted in orchestrator prompt)
-- Rollback SHA: `git log --oneline --fixed-strings --grep="grechman(step" | head -1 | awk '{print $1}'`
+
+Jujutsu:
+```bash
+jj commit -m "grechman(step N): <desc>"
+```
+Git:
+```bash
+git add <files> && git commit -m "grechman(step N): <desc>"
+```
+
+### Rollback
+Jujutsu:
+```bash
+STABLE=$(jj log -r "description(glob:'grechman(step*')" --template '{commit_hash}\n' | head -1)
+jj new -r $STABLE
+```
+Git:
+```bash
+STABLE=$(git log --oneline --fixed-strings --grep="grechman(step" | head -1 | awk '{print $1}')
+git reset --hard $STABLE
+```
 
 ### If Stuck
 - Max 2 approaches per step
-- After 2 failures: rollback to last stable SHA
-  ```bash
-  STABLE=$(git log --oneline --fixed-strings --grep="grechman(step" | head -1 | awk '{print $1}')
-  git reset --hard $STABLE
-  ```
+- After 2 failures: rollback to last stable SHA (use VCS commands above)
 - Return `GRECHMAN BLOCKED: <reason>`
 - Bugs outside your scope: log to report's `discovered_issues`, do NOT fix
 
@@ -72,7 +95,7 @@ commits:
   - <hash>: <message>
 files_created: [list or []]
 files_modified: [list or []]
-decision: <one sentence: what was done and how>
+decision: <2-3 sentences: what was done, key choices made, gotchas found>
 tools_used: [list of skills/MCP tools invoked]
 blockers: <if any, else null>
 # On success (include if non-empty):
@@ -85,6 +108,8 @@ failure_reason: <reason>
 last_clean_commit: <SHA>
 partial_safe_to_merge: true | false
 ```
+
+The `decision` field is critical — the orchestrator passes it to the next agent as context. Be specific about choices made and why.
 
 ## Return Protocol
 

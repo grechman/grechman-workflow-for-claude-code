@@ -78,12 +78,30 @@ Build `_generated.entities` and `_generated.state` from findings.
 
 If Supabase MCP not available: skip this section, note "entities: # Supabase MCP not available — add manually".
 
-### 1c. Dependency graph (if depwire MCP available)
+### 1c. Dependency graph (if depwire CLI available)
 
-If depwire MCP is available:
-- Call `get_architecture_summary` → extract key architectural layers and their relationships
+Try: `depwire --version 2>/dev/null || npx depwire-cli --version 2>/dev/null`. If either resolves (exit 0):
 
-Store for display in Phase 2. Do not put in ontology.yaml directly — it changes too frequently.
+1. Run `depwire parse . --pretty --stats` (or `npx depwire-cli parse . --pretty --stats` if not globally installed) → captures full dependency graph as JSON (zero LLM tokens, pure tree-sitter)
+2. Save raw output to `.depwire/graph.json` (gitignore it)
+3. Extract from the JSON:
+   - Top-level modules/directories and their outbound dependency counts
+   - Files with highest fan-in (most depended on) — these are architectural load-bearing files
+   - Circular dependency chains if any
+4. Build `_generated.dependencies` from findings:
+   ```yaml
+   dependencies:
+     tool: "depwire-cli"
+     parsed_at: "<YYYY-MM-DD>"
+     total_symbols: N
+     total_edges: N
+     load_bearing_files:
+       - path: "src/lib/db.ts"
+         fan_in: 23
+     circular_deps: []  # or list of chains
+   ```
+
+If depwire CLI not available: skip this section, note "dependencies: # depwire not installed — run: npm install -g depwire-cli".
 
 ### 1d. Architecture decisions (if adr-tools installed)
 
@@ -99,8 +117,8 @@ Output a clear summary of what was found:
 Auto-extraction complete:
   Stack: [list what was found or "not found"]
   Entities: [N tables found / "Supabase MCP not available"]
+  Dependencies: [N symbols, N edges / "depwire not installed"]
   ADRs: [N decisions found / "doc/adr/ not found"]
-  depwire: [available / not available]
 ```
 
 Then proceed to Phase 2.
@@ -162,6 +180,8 @@ _generated:
     # [populated from package.json / tsconfig / config files]
   entities:
     # [populated from Supabase MCP or left as placeholder]
+  dependencies:
+    # [populated from depwire CLI or left as placeholder]
   state:
     # [migrations, deploy config if available]
 
@@ -205,6 +225,17 @@ _generated:
       rls: true
       constraints:
         - "INSERT only via Edge Function post-create"
+  dependencies:
+    tool: "depwire-cli"
+    parsed_at: "2026-02-28"
+    total_symbols: 247
+    total_edges: 89
+    load_bearing_files:
+      - path: "src/lib/db.ts"
+        fan_in: 23
+      - path: "src/lib/auth.ts"
+        fan_in: 18
+    circular_deps: []
   state:
     migrations_applied: 14
     last_migration: "20260228_add_comments"

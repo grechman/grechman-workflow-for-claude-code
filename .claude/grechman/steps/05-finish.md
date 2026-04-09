@@ -4,11 +4,16 @@ You are a Grechman finish agent. Wrap up the session and deliver results.
 
 ## Inputs (from orchestrator prompt)
 - Branch name, base branch
+- VCS type (jujutsu or git)
 - Git: on/off, GitHub: on/off
 - Ontology loaded: true/false
 - All task report paths
 - Discovered issues path (if exists)
-- Review report path
+- Review status
+
+## VCS Detection
+
+Use the VCS type provided by the orchestrator for all VCS commands.
 
 ## Procedure
 
@@ -51,13 +56,21 @@ Append completed task decisions to `_manual.decisions`:
 If `adr-tools` installed: `adr new "<decision title>"` for significant architectural decisions.
 
 ### 5. Final Commit (if git on)
+Jujutsu:
+```bash
+jj commit -m "grechman(done): session complete"
+```
+Git:
 ```bash
 git add CLAUDE.md
 # if ontology updated: git add ontology.yaml
 # if --github on: git add README.md
 git commit -m "grechman(done): session complete"
-# push if --github on
 ```
+
+If `--github on`: push.
+Jujutsu: `jj git push`
+Git: `git push -u origin <branch>`
 
 ### 6. Cleanup
 Delete if they exist:
@@ -71,17 +84,14 @@ If `--github on` and PR created: return PR URL.
 
 If `grechman-discovered-issues.md` exists and non-empty: show contents (prefix each `DISCOVERED:`), ask "Run a follow-up /grechman for any? Y/N". Delete file regardless.
 
-## Report
+## Return
 
-Write to `.grechman/sessions/YYYY-MM-DD/task_finish.yaml`:
-```yaml
-task_id: finish
-status: completed
-final_sha: <SHA>
-merge_status: merged | pr_created | kept | discarded
-pr_url: <URL or null>
-session_summary_path: <path>
-blockers: null
+Return to orchestrator:
+```
+FINISH COMPLETE: sha=<final SHA> merge=<merged|pr_created|kept|discarded> pr=<URL|null> session=<session summary path>
 ```
 
-Return to orchestrator ONLY: `"Finish complete. Report: .grechman/sessions/YYYY-MM-DD/task_finish.yaml"`
+Or if there are discovered issues to surface:
+```
+FINISH COMPLETE: sha=<final SHA> merge=<status> pr=<URL|null> session=<path> DISCOVERED: <count> issues logged
+```

@@ -1,6 +1,8 @@
 # Grechman
 
-Claude Code slash command that runs a full dev workflow for medium/hard tasks. Give it a task, it plans, branches, fetches docs, implements, and does a security review before finishing.
+A Claude Code slash command that runs a full dev workflow. Give it a task, it plans, branches, implements with subagents, and reviews its own work before finishing.
+
+For medium and hard tasks only. Simple stuff doesn't need this.
 
 ---
 
@@ -9,27 +11,33 @@ Claude Code slash command that runs a full dev workflow for medium/hard tasks. G
 `/grechman add OAuth login` will:
 
 1. Check required skills are installed
-2. Count implementation steps and make sure they fit in the iteration budget
-3. Write a design doc and a plan
-4. Create a `grechman/<slug>` branch (checks your tree is clean first)
-5. Pull library docs from Context7 and cache them
-6. Pick an execution mode and run
-7. Drop a fallback file if it gets stuck so you can resume
-8. Do a code + security review before the final commit
+2. Optionally refresh project ontology (`--ontology on`)
+3. Count implementation steps, check they fit in the budget
+4. Write a design doc and plan, using ontology data if available (conventions, constraints, past failures)
+5. Create a `grechman/<slug>` branch
+6. Pull library docs from Context7 and cache them
+7. Pick an execution mode, dispatch coding agents
+8. Write a fallback file if it gets stuck so you can resume
+9. Run a review loop (up to 3 passes, fixes its own issues, alerts you if the same bug keeps coming back)
+10. Refresh ontology to capture any dependency drift
 
 ---
 
 ## Install
 
-Copy `grechman.md` to your Claude Code commands folder:
+Copy these files to your Claude Code config:
 
 ```
 ~/.claude/commands/grechman.md
-```
-
-Windows:
-```
-%USERPROFILE%\.claude\commands\grechman.md
+~/.claude/commands/grechman-ontology.md
+~/.claude/grechman/steps/00-setup.md
+~/.claude/grechman/steps/01-planning.md
+~/.claude/grechman/steps/01u-ultraplan-handoff.md
+~/.claude/grechman/steps/02-dispatch.md
+~/.claude/grechman/steps/03-agent-contract.md
+~/.claude/grechman/steps/04-review.md
+~/.claude/grechman/steps/05-finish.md
+~/.claude/grechman/steps/fallback.md
 ```
 
 Reload Claude Code, type `/grechman` to check it shows up.
@@ -38,20 +46,30 @@ Reload Claude Code, type `/grechman` to check it shows up.
 
 ## Required skills
 
-These two need to be installed or it won't start:
+Won't start without these:
 
-- `ralph-loop`
-- `superpowers:*`
+- `superpowers:*` (brainstorming, writing-plans, requesting-code-review, finishing-a-development-branch)
 
-Uses these if they're there:
+Uses these if installed:
 
-- `frontend-design` — UI/CSS work
-- `humanizer` — cleans PR descriptions when `--github on`
-- `code-review:code-review` — reviewing existing PRs
-- Playwright MCP — browser/frontend tasks
-- MCP Memory, Sequential Thinking MCP, Desktop Commander MCP
-- depwire MCP — dependency graph, blast-radius conflict detection, entity scoping
-- `adr-tools` — architecture decision records (created in Step 6d)
+- `frontend-design` -- UI/CSS work
+- `humanizer` -- cleans PR descriptions when `--github on`
+- `code-review:code-review` -- reviewing existing PRs
+- Playwright MCP -- browser/frontend tasks
+- MCP Memory, Sequential Thinking MCP
+- `adr-tools` -- architecture decision records
+
+---
+
+## depwire (optional, recommended)
+
+depwire gives the ontology system a dependency graph of your codebase via tree-sitter. No LLM calls, runs locally.
+
+```bash
+sudo npm install -g depwire-cli
+```
+
+Called once during ontology extraction (`/grechman-ontology --diff`). Not an MCP server. Supports TypeScript, JavaScript, Python, Go, Rust, C.
 
 ---
 
@@ -63,17 +81,19 @@ Uses these if they're there:
 
 | Flag | Default | Values | What it does |
 |---|---|---|---|
-| `--complexity` | `medium` | `medium` / `hard` | Sets iteration budget |
+| `--complexity` | `medium` | `medium` / `hard` | Sets iteration budget (15 / 25) |
 | `--git` | `on` | `on` / `off` | Branch and commit after each step |
 | `--github` | `off` | `on` / `off` | Push and open a PR when done |
 | `--pre-specified` | `off` | `on` / `off` | Skip brainstorming if you already have a plan |
-| `--max-iterations-ralph` | 15 / 25 | any number | Override the iteration cap |
-| `--resume` | — | path to fallback file | Resume a stuck session |
+| `--ontology` | `off` | `on` / `off` | Run `/grechman-ontology --diff` before planning |
+| `--planning` | `auto` | `local` / `ultra` / `auto` | Planning mode (auto = ultra if hard, local if medium) |
+| `--budget` | 15 / 25 | any number | Override the iteration cap |
+| `--resume` | -- | path to fallback file | Resume a stuck session |
 
 ```bash
 /grechman add avatar upload to profile page
 
-/grechman refactor auth to JWT --complexity hard --github on
+/grechman refactor auth to JWT --complexity hard --github on --ontology on
 
 /grechman implement plan in docs/plans/api-redesign.md --pre-specified on
 
@@ -84,11 +104,22 @@ Uses these if they're there:
 
 ## Execution modes
 
-It picks one before running anything and asks you to confirm:
+Picked before running, confirmed with you:
 
-- **RALPH_LOOP** — default, for anything with 8 or fewer tightly coupled steps
-- **SEQUENTIAL_SUBAGENTS** — 3+ stages with clear handoffs (schema → models → API → tests)
-- **PARALLEL** — multiple groups of steps that touch completely different files
+- RALPH_LOOP -- one agent per step, sequential
+- SEQUENTIAL_SUBAGENTS -- one agent per phase, phases defined in dispatch
+
+---
+
+## Review loop
+
+After coding completes, the review agent runs up to 3 times:
+
+1. Runs `/grechman-ontology --diff` to catch dependency drift
+2. Code review via `superpowers:requesting-code-review`
+3. Security review (XSS, SQL injection, auth, secrets, input validation)
+4. Fixes what it finds and commits
+5. If the same issue shows up twice across iterations, stops and asks you what to do
 
 ---
 
@@ -98,15 +129,15 @@ With `--git on`:
 
 - Branch: `grechman/<slug>`
 - Commits: `grechman(step N): <description>`
-- Always makes three batch commits: `grechman(init)`, `grechman(knowledge)`, `grechman(done)`
-- Won't commit until verification passes
+- Review fixes: `grechman(review): fix review issues iteration N`
+- Final: `grechman(done): session complete`
 - Never touches `main` or `master`
 
 ---
 
 ## When it gets stuck
 
-If it hits the iteration limit, a merge conflict, a missing package, or a rollback it can't recover from — it writes `grechman-fallback.md` with the last stable SHA and what's left to do, then stops and prints the resume command:
+Hits the iteration limit, a merge conflict, or something it can't recover from? It writes `grechman-fallback.md` with the last stable SHA and remaining work, then stops:
 
 ```bash
 /grechman --resume grechman-fallback.md --complexity hard --git on
@@ -114,48 +145,48 @@ If it hits the iteration limit, a merge conflict, a missing package, or a rollba
 
 ---
 
-## Ontology System
+## Ontology system
 
-Grechman can maintain a structured model of your project so agents don't start from zero each session.
+Maintains a structured model of your project so agents don't start from zero each session. Two blocks: `_generated` (auto-extracted, overwritten on refresh) and `_manual` (your conventions and decisions, never overwritten).
 
 ### Setup
 
 ```bash
-# 1. Install the ontology command (same way as grechman.md)
+# Install the ontology command
 cp .claude/commands/grechman-ontology.md ~/.claude/commands/
 
-# 2. Optional: install depwire for dependency graph analysis
-claude mcp add depwire -- npx -y depwire-cli mcp
+# Optional: depwire for dependency graphs (no LLM tokens)
+sudo npm install -g depwire-cli
 
-# 3. Optional: install adr-tools for architecture decision records
+# Optional: adr-tools for architecture decision records
 npm install -g adr-tools
-adr init doc/adr  # run once in your project root
+adr init doc/adr  # once per project
 ```
 
-### Create your first ontology
+### First ontology
 
 ```bash
 /grechman-ontology
 ```
 
-This interviews you and auto-extracts what it can from your codebase (package.json, tsconfig, Supabase schema if MCP is available). Creates `ontology.yaml` in your project root.
+Interviews you, auto-extracts from package.json, tsconfig, depwire, Supabase (if MCP available). Creates `ontology.yaml` in your project root.
 
-### Update after schema changes
+### Refresh after changes
 
 ```bash
 /grechman-ontology --diff
 ```
 
-Re-extracts the `_generated` block, preserves your `_manual` block unchanged.
+Re-extracts `_generated`, leaves `_manual` alone.
 
-### What gets captured automatically during sessions
+### How the workflow uses it
 
-Every grechman session reads `ontology.yaml` and:
-- Injects relevant context into each agent's KNOWLEDGE BLOCK
-- Appends new conventions when a step establishes a reusable pattern
-- Appends rejected approaches when a step gets blocked
+- Before planning (`--ontology on`): refreshes ontology. Planning agent reads conventions, constraints, rejected approaches, load-bearing files.
+- During dispatch: knowledge block flags high fan-in files so coding agents know what has a wide blast radius.
+- During review: ontology refreshed again to detect new circular deps or shifted dependencies.
+- During coding: agents read `_manual` for rules, append new conventions or rejected approaches as they go.
 
-### ontology.yaml structure
+### ontology.yaml
 
 ```yaml
 _generated:           # auto-extracted, overwritten by --diff
@@ -168,12 +199,21 @@ _generated:           # auto-extracted, overwritten by --diff
       source: "public.posts"
       rls: true
       constraints: ["INSERT only via Edge Function post-create"]
+  dependencies:       # from depwire CLI, no LLM tokens
+    tool: "depwire-cli"
+    parsed_at: "2026-02-28"
+    total_symbols: 247
+    total_edges: 89
+    load_bearing_files:
+      - path: "src/lib/db.ts"
+        fan_in: 23
+    circular_deps: []
 
 _manual:              # append-only, written by agents and you
   conventions:
     - "Supabase client only in server components"
   decisions:
-    - "Use Supabase Auth over NextAuth — native RLS support"
+    - "Use Supabase Auth over NextAuth -- native RLS support"
   rejected_approaches:
     - step: 3
       session: "2026-02-28"
@@ -185,23 +225,35 @@ _manual:              # append-only, written by agents and you
 
 ---
 
-## Files
+## Files it creates
 
-| File | What it is |
+| File | What |
 |---|---|
 | `CLAUDE.md` | Session log |
 | `knowledge.md` | Cached library docs |
-| `ontology.yaml` | Project domain model (Ontology System) |
+| `ontology.yaml` | Project domain model |
+| `.depwire/graph.json` | Raw depwire graph (gitignored) |
 | `docs/plans/*.md` | Design docs and plans |
-| `doc/adr/*.md` | Architecture Decision Records (if adr-tools installed) |
+| `doc/adr/*.md` | ADRs (if adr-tools installed) |
 | `grechman-fallback.md` | Resume state |
 | `grechman-dispatch.md` | Work manifest (deleted when done) |
+| `.grechman/task-reports/` | Per-task YAML reports |
+| `.grechman/knowledge-block.md` | Context block for coding agents |
 
 ---
 
-## Security
+## Steps
 
-Before the final commit it checks: XSS, exposed paths, SQL injection, auth logic, input validation, rate limiting, hardcoded secrets. Finds something it can't fix in one attempt — it stops and tells you. Doesn't skip it.
+| # | Step | File | Skip when |
+|---|---|---|---|
+| 0 | Setup | `00-setup.md` | never |
+| 0o | Ontology Refresh | inline | `--ontology off` or `--resume` |
+| 1 | Planning | `01-planning.md` | `--resume` or `planning=ultra` |
+| 1U | Ultraplan Handoff | `01u-ultraplan-handoff.md` | `planning=local` or `--resume` |
+| 2 | Dispatch | `02-dispatch.md` | `--resume` (reads existing dispatch) |
+| 3-N | Coding | `03-agent-contract.md` | -- |
+| R | Review (loop, max 3) | `04-review.md` | -- |
+| F | Finish | `05-finish.md` | -- |
 
 ---
 
