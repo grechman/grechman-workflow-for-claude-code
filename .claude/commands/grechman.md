@@ -15,12 +15,9 @@ $ARGUMENTS
 | `--git` | `on` | `on` / `off` |
 | `--github` | `off` | `on` / `off` (needs `--git on` + remote) |
 | `--pre-specified` | `off` | `on` — skip brainstorming |
-| `--planning` | auto | `local` / `ultra` / `auto` |
 | `--budget` | medium=15 / hard=25 | total Agent dispatches |
 | `--ontology` | `off` | `on` — run `/grechman-ontology --diff` before planning |
 | `--resume` | off | path to grechman-fallback.md |
-
-`--planning auto` resolves to: `ultra` if complexity=hard, `local` if complexity=medium.
 
 If `--github on` + no remote: warn + set off.
 
@@ -31,7 +28,7 @@ If `--github on` + no remote: warn + set off.
 Maintain this EXACTLY between every turn. Update after each agent return:
 
 ```
-GRECHMAN: step=<name> | complexity=<X> | planning=<local|ultra> | git=<X> | github=<X> | ontology=<on|off> | budget=<used>/<total> | mode=<pending|ralph|sequential> | branch=<X> | vcs=<jujutsu|git> | steps=<done>/<total> | last_sha=<X>
+GRECHMAN: step=<name> | complexity=<X> | git=<X> | github=<X> | ontology=<on|off> | budget=<used>/<total> | mode=<pending|ralph|sequential> | branch=<X> | vcs=<jujutsu|git> | steps=<done>/<total> | last_sha=<X>
 ```
 
 ---
@@ -56,8 +53,7 @@ This prevents agents from re-discovering things or making contradictory choices.
 |---|---|---|---|
 | 0 | Setup | `.claude/grechman/steps/00-setup.md` | never |
 | 0o | Ontology Refresh | inline (see below) | `--ontology off` OR `--resume` |
-| 1 | Planning | `.claude/grechman/steps/01-planning.md` | `--resume` OR `planning=ultra` |
-| 1U | Ultraplan Handoff | `.claude/grechman/steps/01u-ultraplan-handoff.md` | `planning=local` OR `--resume` |
+| 1 | Planning | `.claude/grechman/steps/01-planning.md` | `--resume` |
 | 2 | Dispatch | `.claude/grechman/steps/02-dispatch.md` | `--resume` (read existing dispatch.md) |
 | 3…N | Coding | `.claude/grechman/steps/03-agent-contract.md` | — |
 | R | Review | `.claude/grechman/steps/04-review.md` | — |
@@ -97,18 +93,7 @@ If `ontology.yaml` didn't exist before and `--ontology on`: run `/grechman-ontol
 
 ---
 
-## Ultraplan User Handoff (after step 1U returns)
-
-When step 1U returns `ULTRAPLAN READY: prompt=<path>`:
-1. Print the prompt file contents to the user.
-2. `AskUserQuestion`: "Run ultraplan with the prompt above. When done, choose 'teleport back to terminal' and save the plan. Then give me the plan path."
-   - **Plan is ready** — user provides plan path
-   - **Switch to local planning** — fall back to step 1
-3. Read the plan file. Extract step count and libraries list. Continue to Scope Gate.
-
----
-
-## Scope Gate (after Planning or Ultraplan returns)
+## Scope Gate (after Planning returns)
 
 `step_count × 1.5 ≤ budget` — if fails: show counts + options:
 - A: split task now/later

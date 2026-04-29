@@ -49,10 +49,10 @@ Check ONLY what applies based on file types:
 
 | File type | Check |
 |---|---|
-| Frontend (jsx/tsx/html) | XSS, exposed internal paths |
-| DB/ORM files | SQL injection, parameterized queries |
-| Auth files | Authorization logic correctness |
-| API routes | Input validation, rate limiting |
+| Frontend / templates (html, jsx/tsx, vue, svelte, erb, jinja, etc.) | XSS, exposed internal paths |
+| DB / ORM / raw SQL files | SQL injection, parameterized queries |
+| Auth / session / token files | Authorization logic correctness |
+| HTTP / RPC / API handlers | Input validation, rate limiting |
 | All files | Hardcoded secrets, sensitive data in logs |
 
 If security issue found: **fix it** (single targeted fix). Re-verify. If still failing after one fix: add to issues list.
